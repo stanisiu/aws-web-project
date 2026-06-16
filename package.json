@@ -1,0 +1,12 @@
+{
+  "name": "aws-web-project",
+  "version": "1.0.0",
+  "description": "Node.js app for ECS CI/CD deployment",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
