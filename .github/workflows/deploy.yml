@@ -9,10 +9,11 @@ env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: web-dhtajo-ecr
   IMAGE_TAG: ${{ github.sha }}
+  ASG_NAME: "dhtajo-asg" # 본인의 ASG 이름으로 수정하세요
 
 permissions:
   contents: read
-  id-token: write # 중요: OIDC 인증을 위해 반드시 필요
+  id-token: write
 
 jobs:
   deploy:
@@ -25,7 +26,6 @@ jobs:
       - name: AWS OIDC Role Assume
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Secret 대신 직접 ARN을 입력하여 테스트합니다.
           role-to-assume: arn:aws:iam::665557889697:role/GitHubActions-ECS-Deploy-Role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActionsSession
@@ -40,9 +40,15 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
           docker tag $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
-          
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
 
+      - name: ASG 인스턴스 새로고침 (Instance Refresh)
+        run: |
+          # ASG의 인스턴스를 최신 버전으로 자동 교체 (최신 이미지 pull 유도)
+          aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 60}'
+
       - name: 배포 완료
-        run: echo "🎉 배포 완료! Image Tag = ${{ env.IMAGE_TAG }}"
+        run: echo "🎉 배포 및 ASG 새로고침 시작! Image Tag = ${{ env.IMAGE_TAG }}"
