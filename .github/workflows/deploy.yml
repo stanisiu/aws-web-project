@@ -25,7 +25,8 @@ jobs:
       - name: AWS OIDC Role Assume
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          # Secret 대신 직접 ARN을 입력하여 테스트합니다.
+          role-to-assume: arn:aws:iam::665557889697:role/GitHubActions-ECS-Deploy-Role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActionsSession
 
