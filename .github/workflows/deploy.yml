@@ -8,7 +8,9 @@ on:
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: web-dhtajo-ecr
-  IMAGE_TAG: ${{ github.sha }}        # 고유 태그 (rollback 용이)
+  IMAGE_TAG: ${{ github.sha }}
+  ASG_NAME: "dhtajo-web-asg"
+  LAUNCH_TEMPLATE_NAME: "web-dhtajo-ec2-lt"   # ← 확인된 이름
 
 permissions:
   contents: read
@@ -26,7 +28,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::665557889697:role/GitHubActions-ECS-Deploy-Role
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActionsSession
 
       - name: ECR 로그인
         id: login-ecr
@@ -37,39 +38,22 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
-          
-          # latest 태그도 함께 push (User Data에서 사용)
           docker tag $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
           
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
-          
-          echo "IMAGE_TAG=${{ env.IMAGE_TAG }}" >> $GITHUB_ENV
-
-      - name: Launch Template 신규 버전 생성 (중요!)
-        run: |
-          # Launch Template 최신 버전 생성 (User Data에 IMAGE_TAG 주입 가능)
-          aws ec2 create-launch-template-version \
-            --launch-template-name "dhtajo-web-launch-template" \   # ← 실제 Launch Template 이름으로 변경
-            --version-description "Deploy ${{ env.IMAGE_TAG }}" \
-            --source-version 1 \
-            --launch-template-data '{"ImageId":"ami-0xxxxxxxxxxxxxx"}'  # 필요 시 AMI 업데이트
 
       - name: ASG Instance Refresh (무중단 배포)
         run: |
+          echo "🚀 ASG Instance Refresh 시작 (Image: ${{ env.IMAGE_TAG }})"
+          
           aws autoscaling start-instance-refresh \
             --auto-scaling-group-name ${{ env.ASG_NAME }} \
             --preferences '{
               "MinHealthyPercentage": 70,
-              "InstanceWarmup": 120,
+              "InstanceWarmup": 180,
               "CheckpointPercentages": [50, 100],
-              "CheckpointDelay": 60
+              "CheckpointDelay": 90
             }'
-          echo "✅ ASG Instance Refresh 시작됨 (Image: ${{ env.IMAGE_TAG }})"
-
-      - name: 배포 모니터링
-        run: |
-          echo "🚀 배포 진행 중... (최대 5~10분 소요)"
-          aws autoscaling describe-instance-refreshes \
-            --auto-scaling-group-name ${{ env.ASG_NAME }} \
-            --query 'InstanceRefreshes[0].Status'
+          
+          echo "✅ ASG Instance Refresh 명령이 성공적으로 전송되었습니다."
