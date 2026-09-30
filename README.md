@@ -1,8 +1,10 @@
 # 🚀 DHTAJO: AWS Automated Web Deployment Infrastructure
 
-**DHTAJO** is a team infrastructure project focused on migrating a manually deployed legacy web application to an AWS-based containerized environment with automated CI/CD, rolling deployment, and improved credential management.
+**DHTAJO** is a team infrastructure project focused on modernizing a manually operated AWS web application environment through containerization, automated CI/CD, rolling deployment, and improved credential management.
 
-The project replaces manual AMI-based deployment procedures with a deployment pipeline integrating **GitHub Actions, AWS IAM OIDC, Amazon ECR, EC2 Auto Scaling, and Application Load Balancer**.
+The project deploys a **Java 17 / Tomcat 10 web application packaged as a WAR file** using Docker and Amazon ECR, with application instances managed by EC2 Auto Scaling behind an Application Load Balancer.
+
+Deployment automation is implemented through **GitHub Actions and AWS IAM OIDC**, reducing manual deployment steps and eliminating the need to store long-lived AWS access keys in the CI/CD workflow.
 
 > **Project Focus:** Cloud Infrastructure · CI/CD Automation · Containerization · IAM Security · Rolling Deployment
 
@@ -19,6 +21,7 @@ The project replaces manual AMI-based deployment procedures with a deployment pi
 | CI/CD | GitHub Actions |
 | Identity & Security | AWS IAM, OIDC, AWS STS, Security Groups |
 | Containerization | Docker, Amazon ECR |
+| Application | Java Web Application (WAR) |
 | Runtime | Java 17, Tomcat 10 |
 
 ---
@@ -29,34 +32,42 @@ The project replaces manual AMI-based deployment procedures with a deployment pi
 
 ### Architecture Design
 
-The infrastructure was designed around network isolation, controlled traffic flow, automated deployment, and reduced reliance on long-lived credentials.
+The infrastructure was designed around network isolation, controlled traffic flow, automated application delivery, and reduced reliance on long-lived credentials.
 
 ### 1. Network Isolation
 
 Application instances are deployed inside **private subnets without public IP addresses**.
 
-External HTTP traffic enters the infrastructure through the **Application Load Balancer**, while outbound internet access required by private instances is provided through a NAT Gateway.
+External application traffic enters the infrastructure through the **Application Load Balancer**, while outbound internet access required by private instances is provided through a NAT Gateway.
 
 ```text
-Internet
-   │
-   ▼
-Application Load Balancer
-   │
-   ▼
-Private EC2 Auto Scaling Group
-   │
-   ├── Docker Container
-   │      └── Java / Tomcat Application
-   │
-   ▼
-NAT Gateway
-   │
-   ▼
+                    Internet
+                       │
+                       ▼
+            Application Load Balancer
+                       │
+                       ▼
+              Private Subnet
+                       │
+                       ▼
+           EC2 Auto Scaling Group
+                       │
+                       ▼
+               Docker Container
+                       │
+                       ▼
+             Java / Tomcat App
+                       
+Private EC2 Instances
+        │
+        ▼
+    NAT Gateway
+        │
+        ▼
 Amazon ECR / External Services
 ```
 
-This design reduces direct exposure of application instances to the public internet.
+This design reduces direct exposure of application instances to the public internet while maintaining controlled outbound connectivity.
 
 ### 2. Security Group Chaining
 
@@ -67,11 +78,17 @@ Internet
    │
    │ HTTP/HTTPS
    ▼
-ALB Security Group
+Application Load Balancer
    │
-   │ TCP 8080
+   │ ALB Security Group
+   ▼
+TCP 8080
+   │
    ▼
 EC2 Security Group
+   │
+   ▼
+Tomcat Application
 ```
 
 Using the ALB security group as the source restricts direct access to the application port and enforces the intended traffic path through the load balancer.
@@ -115,85 +132,96 @@ repo:stanisiu/aws-web-project:*
 This approach:
 
 - Avoids storing long-lived AWS access keys in GitHub
-- Uses temporary AWS credentials through STS
+- Uses temporary AWS credentials through AWS STS
 - Restricts role assumption to the intended repository context
 - Reduces credential exposure in the CI/CD workflow
 
 ---
 
-## 🔄 2. Rolling Deployment with ASG Instance Refresh
+## 📦 2. Java/Tomcat Containerization
 
-Application deployment uses **EC2 Auto Scaling Instance Refresh** to progressively replace existing application instances with instances running the updated version.
+The application is packaged as a **WAR file** and deployed using a Tomcat-based Docker image.
+
+The container build process follows this structure:
+
+```text
+Java Web Application
+        │
+        ▼
+     WAR File
+        │
+        ▼
+     Dockerfile
+        │
+        ▼
+Tomcat 10 Container Image
+        │
+        ▼
+    Amazon ECR
+        │
+        ▼
+   EC2 Instance
+        │
+        ▼
+  Docker Container
+        │
+        ▼
+Java / Tomcat Application
+```
+
+The Docker image provides a consistent application runtime across EC2 instances and allows application versions to be distributed through Amazon ECR.
+
+This repository therefore uses **Java/Tomcat as the application runtime**, with Docker serving as the standardized deployment unit.
+
+---
+
+## 🔄 3. Rolling Deployment with ASG Instance Refresh
+
+Application deployment uses **EC2 Auto Scaling Instance Refresh** to progressively replace existing application instances with instances running the updated container image.
 
 The deployment flow is:
 
 ```text
-Code Push
-   │
-   ▼
-GitHub Actions
-   │
-   ▼
-Docker Image Build
-   │
-   ▼
-Amazon ECR
-   │
-   ▼
-ASG Instance Refresh
-   │
-   ▼
-New EC2 Instance
-   │
-   ▼
-Application Startup
-   │
-   ▼
-ALB Health Check
-   │
-   ├── Healthy ──► Receive Traffic
-   │
-   └── Unhealthy ► Not Added to Traffic Path
+Code / Application Update
+          │
+          ▼
+     GitHub Actions
+          │
+          ▼
+   Build Docker Image
+          │
+          ▼
+      Amazon ECR
+          │
+          ▼
+Trigger ASG Instance Refresh
+          │
+          ▼
+     New EC2 Instance
+          │
+          ▼
+Pull Container Image
+          │
+          ▼
+Start Tomcat Container
+          │
+          ▼
+    ALB Health Check
+          │
+          ├── Healthy ──► Receive Traffic
+          │
+          └── Unhealthy ► Excluded from Traffic
 ```
 
-ALB health checks are used to validate instance availability before the instance participates in normal application traffic.
+ALB health checks validate instance availability before new instances participate in normal application traffic.
 
-This rolling replacement strategy was implemented to **minimize service interruption during application deployment** rather than replacing all application instances simultaneously.
-
----
-
-## 📦 3. Containerized Application Deployment
-
-The application runtime was containerized using Docker and distributed through Amazon ECR.
-
-The CI/CD pipeline builds the application image and pushes it to ECR, allowing EC2 instances to retrieve the required application image during deployment.
-
-```text
-Application Source
-        │
-        ▼
-   Docker Build
-        │
-        ▼
-   Amazon ECR
-        │
-        ▼
-    EC2 Instance
-        │
-        ▼
- Docker Container
-        │
-        ▼
- Java 17 / Tomcat 10
-```
-
-Containerization provides a consistent application runtime across deployment instances and simplifies application version delivery.
+This rolling replacement strategy was implemented to **minimize service interruption during deployment** rather than replacing all application instances simultaneously.
 
 ---
 
 # ⚙️ CI/CD Pipeline
 
-The deployment workflow automates the application delivery process from source changes to infrastructure rollout.
+The deployment workflow automates application delivery from a repository update to infrastructure rollout.
 
 ```text
 Git Push
@@ -203,29 +231,32 @@ GitHub Actions
    │
    ├── Authenticate to AWS via OIDC
    │
-   ├── Build Docker Image
+   ├── Build Tomcat Docker Image
    │
    ├── Push Image to Amazon ECR
    │
    └── Trigger ASG Instance Refresh
    │
    ▼
-New EC2 Instances
+EC2 Auto Scaling Group
    │
    ▼
-Pull Container Image
+New EC2 Instance
    │
-   ▼
-Start Application
-   │
-   ▼
-ALB Health Check
-   │
-   ▼
-Traffic Serving
+   ├── Pull Image from ECR
+   └── Start Docker Container
+              │
+              ▼
+       Java / Tomcat App
+              │
+              ▼
+       ALB Health Check
+              │
+              ▼
+        Traffic Serving
 ```
 
-This reduced the number of manual steps required during application deployment and standardized the deployment workflow.
+This workflow reduces manual application deployment steps and standardizes the deployment process across EC2 instances.
 
 ---
 
@@ -234,7 +265,7 @@ This reduced the number of manual steps required during application deployment a
 The following results were recorded during the project environment and represent measurements from the implemented lab/test deployment.
 
 | Metric | Before Migration | After Migration | Observed Change |
-|---|---:|---:|---:|
+|---|---:|---:|---|
 | **Application Deployment Lead Time** | Approx. 15–20 min | **Approx. 36 sec** | Significantly reduced deployment initiation time |
 | **Deployment Process** | Manual deployment steps | **Automated CI/CD workflow** | Reduced manual intervention |
 | **Deployment Interruption** | Approx. 1–3 min | **No interruption observed during testing** | Improved deployment availability |
@@ -246,7 +277,7 @@ The following results were recorded during the project environment and represent
 
 # 🛠 Troubleshooting Experience
 
-## IAM Role Availability During Instance Bootstrap
+## 1. IAM Role Availability During Instance Bootstrap
 
 During instance initialization, AWS API operations could fail before the instance role and required AWS access were fully available.
 
@@ -262,7 +293,7 @@ This improved the reliability of automated instance initialization.
 
 ---
 
-## Docker Daemon Initialization
+## 2. Docker Daemon Initialization
 
 Docker commands could execute before the Docker daemon was fully ready immediately after installation.
 
@@ -282,15 +313,43 @@ This synchronizes the bootstrap workflow with Docker daemon availability and red
 
 The project applies several controls to reduce infrastructure exposure and credential risk:
 
-- EC2 application instances deployed without public IP addresses
-- Application traffic routed through the ALB
-- Security group references used to restrict EC2 application traffic
+- EC2 application instances deployed in private subnets without public IP addresses
+- External application traffic routed through the Application Load Balancer
+- EC2 application port restricted to traffic originating from the ALB security group
 - GitHub Actions authenticated through AWS IAM OIDC
 - Temporary AWS credentials issued through AWS STS
 - Repository context restrictions applied to IAM role assumption
-- Application artifacts distributed through private Amazon ECR repositories
+- Application container images distributed through Amazon ECR
+- Long-lived AWS access keys removed from the CI/CD authentication workflow
 
-These controls reduce unnecessary public exposure and reliance on long-lived credentials while maintaining an automated deployment workflow.
+These controls reduce unnecessary public exposure and reliance on long-lived credentials while maintaining an automated application deployment workflow.
+
+---
+
+# 📂 Repository Structure
+
+```text
+aws-web-project/
+├── .github/
+│   └── workflows/
+│       └── ...
+├── deploy/
+│   └── ROOT_260612.war
+├── images/
+│   └── architecture.png
+├── Dockerfile
+└── README.md
+```
+
+### Key Components
+
+- **`.github/workflows/`** — GitHub Actions CI/CD workflow
+- **`deploy/`** — Java WAR application artifact used for container deployment
+- **`images/`** — Architecture documentation
+- **`Dockerfile`** — Builds the Tomcat-based application container
+- **`README.md`** — Project architecture and implementation documentation
+
+> Legacy Node.js/Express test files were removed from the final repository because the deployed application runtime is Java/Tomcat.
 
 ---
 
@@ -302,25 +361,27 @@ Through this project, the team implemented and validated:
 - Private EC2 application deployment
 - Application Load Balancer traffic routing
 - EC2 Auto Scaling-based instance management
+- Java/Tomcat application containerization
 - Docker-based application packaging
-- Amazon ECR image distribution
+- Amazon ECR container image distribution
 - GitHub Actions CI/CD automation
 - AWS IAM OIDC authentication
+- Temporary credential issuance through AWS STS
 - Rolling deployment using ASG Instance Refresh
 - ALB-based instance health validation
 - Automated EC2 bootstrap procedures
 - Troubleshooting of IAM and Docker initialization timing issues
 
-The project demonstrates practical experience in integrating **AWS infrastructure, containerization, CI/CD automation, IAM security, and rolling deployment mechanisms** into a single application delivery workflow.
+The project demonstrates practical experience integrating **AWS infrastructure, Java/Tomcat containerization, CI/CD automation, IAM security, and rolling deployment mechanisms** into a unified application delivery workflow.
 
 ---
 
-## 📌 Project Scope
+# 📌 Project Scope
 
 This project demonstrates an automated AWS deployment architecture implemented in a controlled project environment.
 
 The focus is on:
 
-**Network Isolation → Containerization → CI/CD → Keyless Authentication → Automated Deployment → Health Validation → Rolling Instance Replacement**
+**Network Isolation → Java/Tomcat Containerization → CI/CD → OIDC Authentication → ECR Image Distribution → Automated Deployment → Health Validation → Rolling Instance Replacement**
 
 The architecture is intended to demonstrate practical cloud infrastructure and DevOps engineering concepts rather than represent a production-certified deployment platform.
