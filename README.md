@@ -28,7 +28,6 @@ Deployment automation is implemented through **GitHub Actions and AWS IAM OIDC**
 
 ## 📐 System Architecture
 
-![Architecture Diagram](./images/architecture.png)
 
 ### Architecture Design
 
